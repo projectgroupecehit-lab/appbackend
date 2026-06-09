@@ -50,7 +50,8 @@ MQTT_ENABLED=false
 Optional:
 
 ```text
-GEMINI_API_KEY=<required only for AI insights>
+GROQ_API_KEY=<required only for AI insights>
+GROQ_MODEL=llama-3.3-70b-versatile
 CORS_ORIGINS=<comma-separated web origins, if you add a web client>
 MQTT_ENABLED=true
 MQTT_URL=<public mqtts/mqtt broker url>

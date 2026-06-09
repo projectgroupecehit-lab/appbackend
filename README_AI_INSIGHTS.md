@@ -6,9 +6,9 @@ This implementation adds a complete AI-powered water quality analysis system to 
 
 ### Components:
 1. **Frontend** - React Native screen to display AI insights
-2. **Backend** - Node.js API endpoint that orchestrates ML + Gemini
+2. **Backend** - Node.js API endpoint that orchestrates ML + Groq/Llama
 3. **ML Model** - Trained Gradient Boosting classifier with WHO rules
-4. **Gemini Integration** - AI-generated expert reports
+4. **Groq/Llama Integration** - AI-generated expert reports
 
 ---
 
@@ -22,7 +22,7 @@ This implementation adds a complete AI-powered water quality analysis system to 
 
 ### Backend Changes:
 - ✅ **analysis.controller.ts** - API endpoint handler
-- ✅ **analysis.service.ts** - Core analysis logic (ML + Gemini)
+- ✅ **analysis.service.ts** - Core analysis logic (ML + Groq/Llama)
 - ✅ **analysis.routes.ts** - Route definition
 - ✅ **index.ts** - Initialize ML service on startup
 - ✅ **routes/index.ts** - Register analysis routes
@@ -128,13 +128,13 @@ smart-water-backend/
 ├── model_features.pkl               # ← Feature list (created by train script)
 ├── SETUP_AI_INSIGHTS.md             # ← Detailed setup guide
 ├── SETUP_COMMANDS_WINDOWS.ps1       # ← Command reference
-├── package.json                     # ← Dependencies (added google-generative-ai)
+├── package.json                     # ← Dependencies (added axios-based Groq API call)
 ├── src/
 │   ├── index.ts                     # ← (modified) Initialize ML service
 │   ├── controllers/
 │   │   └── analysis.controller.ts   # ← New analysis API controller
 │   ├── services/
-│   │   └── analysis.service.ts      # ← New ML + Gemini service
+│   │   └── analysis.service.ts      # ← New ML + Groq/Llama service
 │   └── routes/
 │       ├── index.ts                 # ← (modified) Register analysis routes
 │       └── analysis.routes.ts       # ← New analysis routes
@@ -162,12 +162,12 @@ src/ (frontend)
    - Gets latest telemetry from MongoDB
    - Calls Python subprocess (predict_water_quality.py)
    - Python runs: WHO rules → ML model → probability
-   - Backend calls Gemini API for expert insights
+   - Backend calls Groq API with Llama 3.3 70B Versatile for expert insights
    - Returns complete analysis
 6. Frontend displays:
    - WHO status (colored badge)
    - ML confidence (%)
-   - Gemini insights (scrollable)
+   - Groq/Llama insights (scrollable)
 ```
 
 ### ML Model Flow:
@@ -189,7 +189,7 @@ Output: [Probability (0-1), Confidence Score]
 
 ### `.env` File (Backend)
 ```
-GEMINI_API_KEY=AIzaSy...
+GROQ_API_KEY=gsk_...
 MONGO_URI=mongodb+srv://...
 NODE_ENV=development
 JWT_ACCESS_SECRET=...
@@ -226,9 +226,9 @@ python train_ml_model.py
 dir *.pkl  # Verify files created
 ```
 
-### Issue: "GEMINI_API_KEY not found"
+### Issue: "GROQ_API_KEY not found"
 1. Check `.env` exists in backend root
-2. Has: `GEMINI_API_KEY=AIzaSy...`
+2. Has: `GROQ_API_KEY=gsk_...`
 3. Restart: `npm run dev`
 
 ### Issue: "No telemetry data found"
@@ -248,10 +248,8 @@ C:\Python311\python.exe train_ml_model.py
 pip install --upgrade scikit-learn pandas joblib numpy
 ```
 
-### Issue: "Cannot find module 'google-generative-ai'"
-```bash
-npm install
-```
+### Issue: "Groq AI insights disabled"
+Set `GROQ_API_KEY` in `.env` and restart the backend.
 
 ### Debug Python Prediction
 ```bash
@@ -269,7 +267,7 @@ python predict_water_quality.py '{"ph": 7.2, "turbidity": 2.0, "conductivity": 3
 ### Backend (Node.js)
 ```json
 {
-  "google-generative-ai": "^0.21.0"
+  "axios": "^1.13.2"
 }
 ```
 
@@ -287,7 +285,7 @@ numpy >= 1.20.0
 
 - [ ] Python installed: `python --version`
 - [ ] ML packages: `pip list | findstr scikit`
-- [ ] Node modules: `dir node_modules | findstr google`
+- [ ] Node modules: `dir node_modules | findstr axios`
 - [ ] Model trained: `dir *.pkl` (shows 3 files)
 - [ ] Backend running: `npm run dev`
 - [ ] API responds: `GET http://localhost:4000/api/analysis/:deviceId`
@@ -309,7 +307,7 @@ numpy >= 1.20.0
 
 ## 🔐 Security Notes
 
-- ✅ **No Gemini API key on mobile** - Backend-only
+- ✅ **No Groq API key on mobile** - Backend-only
 - ✅ **No ML logic on frontend** - Backend-only
 - ✅ **Requires authentication** - JWT token needed for `/api/analysis`
 - ✅ **Model offline** - Works without internet (Python runs locally)
@@ -327,3 +325,4 @@ For detailed instructions, see:
 ---
 
 **🎉 Your AI Water Insights system is ready to deploy!**
+

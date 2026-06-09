@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import axios from 'axios';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -6,12 +6,12 @@ import { TelemetryModel } from '../models/telemetry.model';
 import { logger } from '../utils/logger';
 import { config } from '../config';
 
-// Initialize Gemini client
-const apiKey = process.env.GEMINI_API_KEY;
+// Initialize Groq client config
+const apiKey = process.env.GROQ_API_KEY;
+const groqModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 if (!apiKey) {
-  logger.error('GEMINI_API_KEY not set in .env');
+  logger.warn('GROQ_API_KEY not set. AI insights will be disabled.');
 }
-const genAI = new GoogleGenAI({ apiKey: apiKey || '' });
 
 // ======================================================
 // LOAD ML MODEL via Python
@@ -104,7 +104,7 @@ export const loadMLArtifacts = async () => {
 };
 
 // ======================================================
-// GEMINI INSIGHTS GENERATION
+// GROQ INSIGHTS GENERATION
 // ======================================================
 
 export interface PredictionResult {
@@ -120,7 +120,7 @@ export const generateWaterInsights = async (
 ): Promise<string> => {
   try {
     if (!apiKey) {
-      return 'AI service not configured. Set GEMINI_API_KEY to enable insights.';
+      return 'AI service not configured. Set GROQ_API_KEY to enable insights.';
     }
 
     const prompt = `
@@ -177,14 +177,30 @@ Formatting rules:
 - Keep language simple and practical
 `;
 
-    const response = await genAI.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-    });
+    const response = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model: groqModel,
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 0.3,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 30000,
+      }
+    );
 
-    return response.text || 'AI insight generation returned no text.';
+    return response.data?.choices?.[0]?.message?.content || 'AI insight generation returned no text.';
   } catch (err: any) {
-    logger.error('Gemini insight generation error:', err);
+    logger.error('Groq insight generation error:', err?.response?.data || err);
     return `⚠️ AI insight generation failed.\n\nError: ${err.message || String(err)}`;
   }
 };

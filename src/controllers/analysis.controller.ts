@@ -4,7 +4,7 @@ import { logger } from '../utils/logger';
 
 /**
  * Get water quality analysis for a device
- * Includes: WHO status, ML prediction, confidence, and Gemini insights
+ * Includes: WHO status, ML prediction, confidence, and Groq/Llama insights
  */
 export const getDeviceAnalysis = async (req: Request, res: Response) => {
   try {
