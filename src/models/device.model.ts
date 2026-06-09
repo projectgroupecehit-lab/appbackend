@@ -60,4 +60,4 @@ const DeviceSchema = new Schema<IDevice>({
   }
 }, { timestamps: true });
 
-export const DeviceModel = model<IDevice>("Device", DeviceSchema);
+export const DeviceModel = model<IDevice>("Device", DeviceSchema, "devices");

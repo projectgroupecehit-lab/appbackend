@@ -10,7 +10,7 @@ import { logger } from "./utils/logger";
 async function main() {
   validateRequiredConfig();
 
-  await connectDB(config.mongoUri);
+  await connectDB(config.mongoUri, config.mongoDbName);
 
   // Load ML model artifacts
   await loadMLArtifacts();

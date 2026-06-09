@@ -40,6 +40,7 @@ Set these in Render Dashboard:
 ```text
 NODE_ENV=production
 MONGO_URI=<your MongoDB Atlas connection string>
+MONGO_DB_NAME=test
 JWT_ACCESS_SECRET=<long random secret>
 JWT_REFRESH_SECRET=<another long random secret>
 GOOGLE_WEB_CLIENT_ID=<google web client id>

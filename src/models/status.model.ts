@@ -18,4 +18,4 @@ const StatusSchema = new Schema<IStatus>({
   errorCodes: [String],
 }, { timestamps: true });
 
-export const StatusModel = model<IStatus>("Status", StatusSchema);
+export const StatusModel = model<IStatus>("Status", StatusSchema, "status");

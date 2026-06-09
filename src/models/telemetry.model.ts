@@ -28,4 +28,4 @@ const TelemetrySchema = new Schema<ITelemetry>({
   raw: String,
 }, { timestamps: true });
 
-export const TelemetryModel = model<ITelemetry>("Telemetry", TelemetrySchema);
+export const TelemetryModel = model<ITelemetry>("Telemetry", TelemetrySchema, "telemetries");

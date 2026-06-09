@@ -9,6 +9,7 @@ export const config = {
   nodeEnv,
   // Require an explicit MongoDB Atlas connection string. No local fallback.
   mongoUri: process.env.MONGO_URI || "",
+  mongoDbName: process.env.MONGO_DB_NAME || "test",
   jwtAccessSecret: process.env.JWT_ACCESS_SECRET || (isProduction ? "" : "secret_access"),
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || (isProduction ? "" : "secret_refresh"),
   accessExpiresIn: process.env.ACCESS_TOKEN_EXPIRES_IN || "15m",
