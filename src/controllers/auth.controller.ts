@@ -171,9 +171,6 @@ export async function register(req: Request, res: Response) {
       name: `${name}'s Device`,
     });
 
-    const mapped = await ensurePrimaryDeviceForUser(user, name);
-    user = mapped.user;
-
     // Generate tokens
     const accessToken = signAccessToken({ sub: user._id, roles: user.roles });
     const refreshToken = signRefreshToken({ sub: user._id });
@@ -265,7 +262,7 @@ export async function login(req: Request, res: Response) {
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
     });
 
-    const device = mapped.device;
+    const device = await DeviceModel.findOne({ ownerUserId: user._id });
 
     console.log(`✅ User logged in: ${email}`);
 
@@ -415,6 +412,16 @@ export async function googleLogin(req: Request, res: Response) {
       console.log(`✅ New user registered via Google: ${email}`);
     }
 
+    const mapped = await ensurePrimaryDeviceForUser(user, name);
+    user = mapped.user;
+
+    if (!user) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to map Google account to device",
+      });
+    }
+
     // Generate tokens
     const accessToken = signAccessToken({ sub: user._id, roles: user.roles });
     const refreshToken = signRefreshToken({ sub: user._id });
@@ -426,8 +433,7 @@ export async function googleLogin(req: Request, res: Response) {
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
     });
 
-    // Find user's device
-    const device = await DeviceModel.findOne({ ownerUserId: user._id });
+    const device = mapped.device;
 
     console.log(`✅ User logged in via Google: ${email}`);
 
@@ -439,6 +445,7 @@ export async function googleLogin(req: Request, res: Response) {
           id: user._id,
           email: user.email,
           name: user.profile?.name,
+          deviceId: user.deviceId,
         },
         accessToken,
         refreshToken,
