@@ -6,16 +6,12 @@ import { TempReadingModel } from '../models/temp-reading.model';
 import { logger } from '../utils/logger';
 import { config } from '../config';
 
-// Initialize Groq client config
 const apiKey = process.env.GROQ_API_KEY;
 const groqModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+
 if (!apiKey) {
   logger.warn('GROQ_API_KEY not set. AI insights will be disabled.');
 }
-
-// ======================================================
-// LOAD ML MODEL via Python
-// ======================================================
 
 interface MLPredictionResult {
   who_status: string;
@@ -24,9 +20,85 @@ interface MLPredictionResult {
   reason: string;
 }
 
-/**
- * Call Python ML prediction script
- */
+export interface PredictionResult {
+  who_status: string;
+  ml_prediction: string;
+  ml_probability: number;
+  ai_insights: string;
+}
+
+const getNumber = (value: unknown, fallback: number) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
+const calculateQualityScore = (sample: {
+  ph?: number;
+  turbidity?: number;
+  conductivity?: number;
+  dissolved_oxygen?: number;
+  disolved_oxygen?: number;
+  tds?: number;
+}) => {
+  const ph = getNumber(sample.ph, 7);
+  const turbidity = getNumber(sample.turbidity, 1);
+  const conductivity = getNumber(sample.conductivity, 300);
+  const dissolvedOxygen = getNumber(sample.dissolved_oxygen ?? sample.disolved_oxygen, 7);
+  const tds = getNumber(sample.tds, 200);
+
+  const penalties = [
+    Math.min(Math.abs(ph - 7.2) * 12, 25),
+    Math.min(Math.max(turbidity - 1, 0) * 5, 30),
+    Math.min(Math.max(conductivity - 300, 0) / 20, 25),
+    Math.min(Math.abs(dissolvedOxygen - 7) * 8, 20),
+    Math.min(Math.max(tds - 250, 0) / 12, 25),
+  ];
+
+  return Math.round(Math.max(0, 100 - penalties.reduce((sum, penalty) => sum + penalty, 0)));
+};
+
+const ruleBasedPrediction = (sample: {
+  ph?: number;
+  turbidity?: number;
+  conductivity?: number;
+  dissolved_oxygen?: number;
+  disolved_oxygen?: number;
+  tds?: number;
+}): MLPredictionResult => {
+  const ph = getNumber(sample.ph, 7);
+  const turbidity = getNumber(sample.turbidity, 1);
+  const conductivity = getNumber(sample.conductivity, 300);
+  const dissolvedOxygen = getNumber(sample.dissolved_oxygen ?? sample.disolved_oxygen, 7);
+  const tds = getNumber(sample.tds, 200);
+
+  const hasWhoViolation =
+    ph < 6.5 ||
+    ph > 8.5 ||
+    turbidity >= 5 ||
+    conductivity >= 400 ||
+    dissolvedOxygen < 6.5 ||
+    dissolvedOxygen > 8 ||
+    tds >= 400;
+
+  if (hasWhoViolation) {
+    return {
+      who_status: 'Unsafe (WHO Rule Violation)',
+      ml_prediction: 'Non-Potable Water',
+      ml_probability: 0,
+      reason: 'WHO safety thresholds exceeded',
+    };
+  }
+
+  const score = calculateQualityScore(sample);
+
+  return {
+    who_status: score >= 75 ? 'Safe (Potable)' : 'Needs Treatment',
+    ml_prediction: score >= 75 ? 'Potable Water' : 'Non-Potable Water',
+    ml_probability: Math.min(0.99, Math.max(0.01, score / 100)),
+    reason: 'Rule-based fallback assessment',
+  };
+};
+
 const callPythonMLPredictor = (sampleData: {
   ph?: number;
   turbidity?: number;
@@ -35,10 +107,9 @@ const callPythonMLPredictor = (sampleData: {
   disolved_oxygen?: number;
   tds?: number;
 }): Promise<MLPredictionResult> => {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     try {
       const pythonScript = path.join(__dirname, '..', '..', 'predict_water_quality.py');
-      
       const python = spawn(config.pythonBin, [pythonScript, JSON.stringify(sampleData)]);
       let output = '';
       let errorOutput = '';
@@ -53,42 +124,29 @@ const callPythonMLPredictor = (sampleData: {
 
       python.on('close', (code) => {
         if (code !== 0) {
-          logger.warn(`⚠️  Python process exited with code ${code}: ${errorOutput}`);
-          return resolve({
-            who_status: 'Unable to Assess',
-            ml_prediction: 'Model Unavailable',
-            ml_probability: 0.0,
-            reason: 'ML model temporarily unavailable'
-          });
+          logger.warn(`Python process exited with code ${code}: ${errorOutput}`);
+          return resolve(ruleBasedPrediction(sampleData));
         }
 
         try {
           const result = JSON.parse(output.trim());
           resolve(result);
-        } catch (parseErr) {
+        } catch {
           logger.error('Failed to parse Python output:', output);
-          resolve({
-            who_status: 'Unable to Assess',
-            ml_prediction: 'Parsing Error',
-            ml_probability: 0.0,
-            reason: 'Error parsing ML prediction'
-          });
+          resolve(ruleBasedPrediction(sampleData));
         }
       });
 
       python.on('error', (err) => {
         logger.error('Python process error:', err);
-        reject(err);
+        resolve(ruleBasedPrediction(sampleData));
       });
-    } catch (err) {
-      reject(err);
+    } catch {
+      resolve(ruleBasedPrediction(sampleData));
     }
   });
 };
 
-/**
- * Initialize ML service
- */
 export const loadMLArtifacts = async () => {
   const modelDir = path.join(__dirname, '..', '..');
   const requiredFiles = ['predict_water_quality.py', 'gb_water_model.pkl', 'scaler.pkl', 'model_features.pkl'];
@@ -103,78 +161,73 @@ export const loadMLArtifacts = async () => {
   return true;
 };
 
-// ======================================================
-// GROQ INSIGHTS GENERATION
-// ======================================================
+const fallbackInsight = (sample: any, prediction: MLPredictionResult) => {
+  const score = calculateQualityScore(sample);
 
-export interface PredictionResult {
-  who_status: string;
-  ml_prediction: string;
-  ml_probability: number;
-  ai_insights: string;
-}
+  return [
+    `1. Overall Water Quality Score: ${score}/100.`,
+    `2. Potability Assessment: ${prediction.ml_prediction}.`,
+    '3. Parameter Analysis: Review pH, turbidity, conductivity, dissolved oxygen, and TDS against accepted ranges.',
+    '4. Risks: Untreated use may affect health, taste, scaling, and aquatic safety.',
+    '5. Recommended Treatment: Use filtration, disinfection, aeration, or RO based on failed parameters.',
+    '6. Environmental Impact: Avoid discharge or irrigation until abnormal parameters are controlled.',
+    '7. One-line Conclusion: Treat and retest before drinking use.',
+  ].join('\n\n');
+};
+
+const sanitizeInsight = (text: string) =>
+  text
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/^\s*[-*]\s+/gm, '')
+    .trim();
 
 export const generateWaterInsights = async (
   sample: any,
   prediction: MLPredictionResult
 ): Promise<string> => {
   try {
+    const score = calculateQualityScore(sample);
+
     if (!apiKey) {
-      return 'AI service not configured. Set GROQ_API_KEY to enable insights.';
+      return fallbackInsight(sample, prediction);
     }
 
     const prompt = `
-You are an environmental and water-treatment engineering expert.
+You are a professional water quality expert.
 
-Measured water parameters:
-- pH: ${sample.ph ?? 'N/A'}
-- Turbidity: ${sample.turbidity ?? 'N/A'} NTU
-- Electrical Conductivity: ${sample.conductivity ?? 'N/A'} µS/cm
-- Dissolved Oxygen: ${sample.dissolved_oxygen ?? sample.disolved_oxygen ?? 'N/A'} mg/L
-- Total Dissolved Solids (TDS): ${sample.tds ?? 'N/A'} ppm
+Analyze the following water sample.
 
-System decision: ${prediction.who_status}
-ML confidence: ${(prediction.ml_probability * 100).toFixed(1)}%
+Temperature = ${sample.temperature ?? sample.tempC ?? 'N/A'} C
+pH = ${sample.ph ?? 'N/A'}
+Turbidity = ${sample.turbidity ?? 'N/A'} NTU
+Conductivity = ${sample.conductivity ?? 'N/A'} uS/cm
+Dissolved Oxygen = ${sample.dissolved_oxygen ?? sample.disolved_oxygen ?? 'N/A'} mg/L
+TDS = ${sample.tds ?? 'N/A'} ppm
 
-Your task is to generate a structured expert report with the following sections:
+Current Water Quality Score:
+${score}/100
 
-### 1. Water Quality Classification
-- Describe the overall quality grade of the water (e.g., potable, marginal, industrial-grade, contaminated).
+ML Result:
+${prediction.ml_prediction}
 
-### 2. Key Issues Identified
-- Briefly list which parameters are out of range and why they matter.
+WHO Status:
+${prediction.who_status}
 
-### 3. Recommended Treatment & Filtration Methods
-Suggest suitable treatment methods based on the measured parameters.
-Examples (do NOT limit yourself to these):
-- pH correction using lime, caustic soda, soda ash, or CO₂ dosing
-- Turbidity removal using coagulation–flocculation (alum, ferric salts)
-- Membrane separation (RO / UF / NF) for high EC or TDS
-- Activated carbon filtration
-- Aeration or oxygenation for low dissolved oxygen
-- Ion exchange where applicable
+Provide exactly these seven numbered sections:
 
-Explain **why** each method is recommended.
+1. Overall Water Quality Score
+2. Potability Assessment
+3. Parameter Analysis
+4. Risks
+5. Recommended Treatment
+6. Environmental Impact
+7. One-line Conclusion
 
-⚠️ These are advisory engineering suggestions, not operational instructions.
+Maximum 150 words.
 
-### 4. Post-Treatment Usage Possibilities
-After appropriate treatment, suggest suitable uses such as:
-- Agricultural irrigation (mention specific crops by name)
-- Horticulture or home gardening (mention plant types)
-- Pisciculture or aquaculture (mention fish types if suitable)
-- Industrial or non-potable reuse if applicable
-
-### 5. Health & Environmental Considerations
-- Summarize any remaining risks or precautions.
-
-### 6. Short Conclusion
-- 2 concise lines summarizing treatment feasibility and reuse potential.
-
-Formatting rules:
-- Use clear headings
-- Use bullet points
-- Keep language simple and practical
+Be concise and professional.
+Do not use markdown syntax such as ###, **, *, or bullet symbols.
 `;
 
     const response = await axios.post(
@@ -198,22 +251,18 @@ Formatting rules:
       }
     );
 
-    return response.data?.choices?.[0]?.message?.content || 'AI insight generation returned no text.';
+    const generated = response.data?.choices?.[0]?.message?.content;
+    return generated ? sanitizeInsight(generated) : fallbackInsight(sample, prediction);
   } catch (err: any) {
     logger.error('Groq insight generation error:', err?.response?.data || err);
-    return `⚠️ AI insight generation failed.\n\nError: ${err.message || String(err)}`;
+    return fallbackInsight(sample, prediction);
   }
 };
-
-// ======================================================
-// MAIN ANALYSIS FUNCTION
-// ======================================================
 
 export const analyzeDeviceWaterQuality = async (
   deviceId: string
 ): Promise<PredictionResult> => {
   try {
-    // Fetch latest water reading from the primary Atlas collection: main.temps
     const latestTelemetry = await TempReadingModel.findOne({ device_id: deviceId }).sort({ createdAt: -1 });
 
     if (!latestTelemetry) {
@@ -228,10 +277,7 @@ export const analyzeDeviceWaterQuality = async (
       tds: latestTelemetry.tds,
     };
 
-    // Make prediction using Python
     const prediction = await callPythonMLPredictor(sample);
-
-    // Generate AI insights
     const aiInsights = await generateWaterInsights(sample, prediction);
 
     return {
