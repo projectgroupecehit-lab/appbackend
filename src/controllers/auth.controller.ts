@@ -7,6 +7,7 @@ import { RefreshTokenModel } from "../models/refreshToken.model";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../services/jwt.service";
 import { config } from "../config";
 import { OAuth2Client } from "google-auth-library";
+import { PRIMARY_DEVICE_ID } from "../models/temp-reading.model";
 
 const client = new OAuth2Client();
 
@@ -80,6 +81,32 @@ async function verifyGoogleIdToken(idToken: string) {
   }
 }
 
+async function ensurePrimaryDeviceForUser(user: any, name?: string) {
+  const displayName = name || user.profile?.name || "Smart Water User";
+
+  await UserModel.updateOne(
+    { _id: user._id },
+    { $set: { deviceId: PRIMARY_DEVICE_ID } }
+  );
+
+  await DeviceModel.updateOne(
+    { deviceId: PRIMARY_DEVICE_ID },
+    {
+      $set: {
+        deviceId: PRIMARY_DEVICE_ID,
+        ownerUserId: user._id,
+        name: `${displayName}'s Smart Water Monitor`,
+      },
+    },
+    { upsert: true }
+  );
+
+  const updatedUser = await UserModel.findById(user._id);
+  const device = await DeviceModel.findOne({ deviceId: PRIMARY_DEVICE_ID });
+
+  return { user: updatedUser || user, device };
+}
+
 /**
  * Registers a new user
  * @body {string} email - User email (unique)
@@ -143,6 +170,9 @@ export async function register(req: Request, res: Response) {
       ownerUserId: user._id,
       name: `${name}'s Device`,
     });
+
+    const mapped = await ensurePrimaryDeviceForUser(user, name);
+    user = mapped.user;
 
     // Generate tokens
     const accessToken = signAccessToken({ sub: user._id, roles: user.roles });
@@ -235,8 +265,7 @@ export async function login(req: Request, res: Response) {
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
     });
 
-    // Find user's device
-    const device = await DeviceModel.findOne({ ownerUserId: user._id });
+    const device = mapped.device;
 
     console.log(`✅ User logged in: ${email}`);
 
@@ -248,6 +277,7 @@ export async function login(req: Request, res: Response) {
           id: user._id,
           email: user.email,
           name: user.profile?.name,
+          deviceId: user.deviceId,
         },
         accessToken,
         refreshToken,
@@ -382,12 +412,6 @@ export async function googleLogin(req: Request, res: Response) {
       });
 
       // Create initial device for user
-      const deviceId = crypto.randomBytes(8).toString("hex");
-      await DeviceModel.create({
-        deviceId,
-        ownerUserId: user._id,
-        name: `${name}'s Device`,
-      });
       console.log(`✅ New user registered via Google: ${email}`);
     }
 
@@ -608,20 +632,8 @@ export async function completeGoogleRegistration(req: Request, res: Response) {
       provider: "google",
     });
 
-    // Create initial device for user
-    const deviceId = crypto.randomBytes(8).toString("hex");
-    await DeviceModel.create({
-      deviceId,
-      ownerUserId: user._id,
-      name: `${name}'s Device`,
-    });
-
-    // Update user with deviceId
-    user = await UserModel.findByIdAndUpdate(
-      user._id,
-      { deviceId },
-      { new: true }
-    );
+    const mapped = await ensurePrimaryDeviceForUser(user, name);
+    user = mapped.user;
 
     if (!user) {
       return res.status(500).json({
