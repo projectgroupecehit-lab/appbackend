@@ -15,7 +15,7 @@ services:
       - key: MONGO_URI
         sync: false
       - key: MONGO_DB_NAME
-        value: test
+        value: main
       - key: JWT_ACCESS_SECRET
         sync: false
       - key: JWT_REFRESH_SECRET

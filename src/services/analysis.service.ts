@@ -2,7 +2,7 @@ import axios from 'axios';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { TelemetryModel } from '../models/telemetry.model';
+import { TempReadingModel } from '../models/temp-reading.model';
 import { logger } from '../utils/logger';
 import { config } from '../config';
 
@@ -213,8 +213,8 @@ export const analyzeDeviceWaterQuality = async (
   deviceId: string
 ): Promise<PredictionResult> => {
   try {
-    // Fetch latest telemetry
-    const latestTelemetry = await TelemetryModel.findOne({ deviceId }).sort({ ts: -1 });
+    // Fetch latest water reading from the primary Atlas collection: main.temps
+    const latestTelemetry = await TempReadingModel.findOne({ device_id: deviceId }).sort({ createdAt: -1 });
 
     if (!latestTelemetry) {
       throw new Error('No telemetry data found for this device');
@@ -223,8 +223,8 @@ export const analyzeDeviceWaterQuality = async (
     const sample = {
       ph: latestTelemetry.ph,
       turbidity: latestTelemetry.turbidity,
-      conductivity: latestTelemetry.conductivity,
-      dissolved_oxygen: latestTelemetry.dissolved_oxygen,
+      conductivity: latestTelemetry.ec,
+      dissolved_oxygen: latestTelemetry.do,
       tds: latestTelemetry.tds,
     };
 

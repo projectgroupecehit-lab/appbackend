@@ -1,8 +1,8 @@
 import mqtt from "mqtt";
 import { config } from "../config";
-import { TelemetryModel } from "../models/telemetry.model";
 import { DeviceModel } from "../models/device.model";
 import { StatusModel } from "../models/status.model";
+import { TempReadingModel } from "../models/temp-reading.model";
 import { io } from "./socket.service";
 import { logger } from "../utils/logger";
 
@@ -29,30 +29,27 @@ export function initMqtt() {
 
   client.on("message", async (topic, message) => {
     try {
-      // topic = devices/{deviceId}/telemetry
       const parts = topic.split("/");
       const deviceId = parts[1];
       const payload = JSON.parse(message.toString());
-
       const metrics = payload.metrics || payload;
       const timestamp = payload.ts ? new Date(payload.ts) : new Date();
+      const temperature = metrics.temperature ?? metrics.tempC;
+      const ec = metrics.ec ?? metrics.conductivity;
+      const dissolvedOxygen = metrics.do ?? metrics.dissolved_oxygen;
 
-      // 1️⃣ Store historical telemetry
-      const tele = await TelemetryModel.create({
-        deviceId,
-        ts: timestamp,
-        tds: metrics.tds,
+      await TempReadingModel.create({
+        device_id: deviceId,
+        temperature,
         ph: metrics.ph,
-        tempC: metrics.tempC || metrics.temperature,
-        conductivity: metrics.conductivity,
+        tds: metrics.tds,
+        do: dissolvedOxygen,
+        ec,
         turbidity: metrics.turbidity,
-        dissolved_oxygen: metrics.dissolved_oxygen,
-        flowLpm: metrics.flowLpm,
-        tankPct: metrics.tankPct,
-        raw: payload,
+        createdAt: timestamp,
+        updatedAt: timestamp,
       });
 
-      // 2️⃣ Update Device collection with latest parameters
       await DeviceModel.findOneAndUpdate(
         { deviceId },
         {
@@ -63,31 +60,29 @@ export function initMqtt() {
               ph: metrics.ph,
               tds: metrics.tds,
               turbidity: metrics.turbidity,
-              temperature: metrics.tempC || metrics.temperature,
-              conductivity: metrics.conductivity,
-              dissolved_oxygen: metrics.dissolved_oxygen,
+              temperature,
+              conductivity: ec,
+              dissolved_oxygen: dissolvedOxygen,
               flowLpm: metrics.flowLpm,
               tankPct: metrics.tankPct,
-            }
-          }
+            },
+          },
         },
         { upsert: true, new: true }
       );
 
-      // 3️⃣ Update StatusModel (legacy compatibility)
       await StatusModel.updateOne(
         { deviceId },
         {
           $set: {
             online: true,
             lastSeen: timestamp,
-            metrics: metrics,
+            metrics,
           },
         },
         { upsert: true }
       );
 
-      // 4️⃣ Emit real-time update via Socket.IO
       const deviceData = {
         deviceId,
         timestamp,
@@ -95,16 +90,19 @@ export function initMqtt() {
           ph: metrics.ph,
           tds: metrics.tds,
           turbidity: metrics.turbidity,
-          temperature: metrics.tempC || metrics.temperature,
-          conductivity: metrics.conductivity,
-          dissolved_oxygen: metrics.dissolved_oxygen,
+          temperature,
+          tempC: temperature,
+          conductivity: ec,
+          ec,
+          dissolved_oxygen: dissolvedOxygen,
+          do: dissolvedOxygen,
           flowLpm: metrics.flowLpm,
           tankPct: metrics.tankPct,
-        }
+        },
       };
-      
+
       io && io.to(`device:${deviceId}`).emit("telemetry", deviceData);
-      logger.info(`📊 Telemetry updated for device ${deviceId}`);
+      logger.info(`Telemetry updated for device ${deviceId}`);
     } catch (err) {
       logger.error("mqtt message error", err);
     }

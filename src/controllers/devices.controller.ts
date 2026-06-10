@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { DeviceModel } from "../models/device.model";
+import { normalizeTempReading, TempReadingModel } from "../models/temp-reading.model";
 import { logger } from "../utils/logger";
 import crypto from "crypto";
 
@@ -46,21 +47,25 @@ export async function getDeviceStatus(req: Request, res: Response) {
       return res.status(400).json({ success: false, message: "deviceId is required" });
     }
 
-    const device = await DeviceModel.findOne({ deviceId }).select("deviceId name status lastSeen latest location");
+    const latestReading = await TempReadingModel.findOne({ device_id: deviceId }).sort({ createdAt: -1 });
     
-    if (!device) {
-      return res.status(404).json({ success: false, message: "Device not found" });
+    if (!latestReading) {
+      return res.status(404).json({ success: false, message: "No data available for this device" });
     }
+
+    const latest = normalizeTempReading(latestReading);
+    const lastSeen = latest?.timestamp;
+    const ageMs = lastSeen ? Date.now() - new Date(lastSeen).getTime() : Number.POSITIVE_INFINITY;
+    const status = ageMs <= 10 * 60 * 1000 ? "online" : "offline";
 
     res.status(200).json({
       success: true,
       data: {
-        deviceId: device.deviceId,
-        name: device.name,
-        status: device.status || "offline",
-        lastSeen: device.lastSeen,
-        location: device.location,
-        latest: device.latest || {},
+        deviceId,
+        name: "Smart Water Monitor",
+        status,
+        lastSeen,
+        latest,
       }
     });
   } catch (error) {
@@ -81,19 +86,20 @@ export async function getLatestReading(req: Request, res: Response) {
       return res.status(400).json({ success: false, message: "deviceId is required" });
     }
 
-    const device = await DeviceModel.findOne({ deviceId }).select("deviceId status lastSeen latest");
+    const latestReading = await TempReadingModel.findOne({ device_id: deviceId }).sort({ createdAt: -1 });
     
-    if (!device || !device.latest) {
+    if (!latestReading) {
       return res.status(404).json({ success: false, message: "No data available for this device" });
     }
+
+    const latest = normalizeTempReading(latestReading);
 
     res.status(200).json({
       success: true,
       data: {
-        deviceId: device.deviceId,
-        status: device.status || "offline",
-        timestamp: device.lastSeen,
-        parameters: device.latest,
+        deviceId,
+        timestamp: latest?.timestamp,
+        parameters: latest,
       }
     });
   } catch (error) {
