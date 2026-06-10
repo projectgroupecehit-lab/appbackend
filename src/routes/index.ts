@@ -5,12 +5,9 @@ import ingestRoutes from "./ingest.routes";
 import telemetryRoutes from "./telemetry.routes";
 import userRoutes from "./user.routes";
 import analysisRoutes from "./analysis.routes";
-// import { listUsers, listDevicesDebug } from "../controllers/auth.controller";
 
 const router = Router();
 
-// router.get("/users", listUsers);
-// router.get("/debug/devices", listDevicesDebug);
 router.use("/auth", authRoutes);
 router.use("/devices", devicesRoutes);
 router.use("/ingest", ingestRoutes);

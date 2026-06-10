@@ -22,6 +22,8 @@ services:
         sync: false
       - key: GOOGLE_WEB_CLIENT_ID
         sync: false
+      - key: GOOGLE_ANDROID_CLIENT_ID
+        sync: false
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL

@@ -10,6 +10,74 @@ import { OAuth2Client } from "google-auth-library";
 
 const client = new OAuth2Client();
 
+function getGoogleAudiences() {
+  return [config.google.webClientId, config.google.androidClientId].filter(
+    (clientId): clientId is string => Boolean(clientId)
+  );
+}
+
+function isMalformedJwt(token: string) {
+  return token.split(".").length !== 3;
+}
+
+function isGoogleTokenError(error: any) {
+  if (typeof error?.message !== "string") {
+    return false;
+  }
+
+  return (
+    error.message.includes("Wrong number of segments") ||
+    error.message.includes("Invalid token signature") ||
+    error.message.includes("Token used too late") ||
+    error.message.includes("Invalid Value") ||
+    error.message.includes("audience")
+  );
+}
+
+function isGoogleVerificationNetworkError(error: any) {
+  return (
+    error?.code === "EACCES" ||
+    error?.code === "ENOTFOUND" ||
+    error?.code === "ETIMEDOUT" ||
+    error?.code === "ECONNRESET" ||
+    error?.error?.code === "EACCES" ||
+    error?.error?.code === "ENOTFOUND" ||
+    error?.error?.code === "ETIMEDOUT" ||
+    error?.error?.code === "ECONNRESET"
+  );
+}
+
+async function verifyGoogleIdToken(idToken: string) {
+  const audiences = getGoogleAudiences();
+
+  if (audiences.length === 0) {
+    throw new Error("Google OAuth client ID is not configured");
+  }
+
+  if (isMalformedJwt(idToken)) {
+    throw new Error("Malformed Google ID token");
+  }
+
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken,
+      audience: audiences,
+    });
+
+    const payload = ticket.getPayload();
+    if (!payload) {
+      throw new Error("Invalid Google token payload");
+    }
+    return payload;
+  } catch (error: any) {
+    // Re-throw with better error information
+    if (error.message?.includes("Unable to find a signing key")) {
+      throw new Error("Invalid Google token signature");
+    }
+    throw error;
+  }
+}
+
 /**
  * Registers a new user
  * @body {string} email - User email (unique)
@@ -278,13 +346,19 @@ export async function googleLogin(req: Request, res: Response) {
     }
 
     // Verify Google ID token
-    const ticket = await client.verifyIdToken({
-      idToken,
-      audience: config.google.webClientId,
-    });
+    let payload;
+    try {
+      payload = await verifyGoogleIdToken(idToken);
+    } catch (tokenErr: any) {
+      console.error("Google token verification failed:", tokenErr.message);
+      return res.status(401).json({
+        success: false,
+        message: "Google token verification failed: " + tokenErr.message,
+      });
+    }
 
-    const payload = ticket.getPayload();
     if (!payload || !payload.email || !payload.name) {
+      console.error("Invalid Google token payload:", payload);
       return res.status(401).json({
         success: false,
         message: "Invalid Google token",
@@ -345,11 +419,40 @@ export async function googleLogin(req: Request, res: Response) {
         device,
       },
     });
-  } catch (error) {
-    console.error("Google login error:", error);
+  } catch (error: any) {
+    console.error("Google login error:", {
+      name: error?.name,
+      message: error?.message,
+      code: error?.code,
+      stack: error?.stack?.split('\n')[0]
+    });
+
+    if (error?.message === "Google OAuth client ID is not configured") {
+      return res.status(500).json({
+        success: false,
+        message: "Google sign-in is not configured on the server",
+      });
+    }
+
+    if (error?.message === "Malformed Google ID token" || 
+        error?.message === "Invalid Google ID token" ||
+        isGoogleTokenError(error)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired Google sign-in token",
+      });
+    }
+
+    if (isGoogleVerificationNetworkError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: "Unable to verify Google sign-in token. Please try again.",
+      });
+    }
+
     return res.status(500).json({
       success: false,
-      message: "Google login failed",
+      message: "Google login failed: " + (error?.message || "Unknown error"),
     });
   }
 }
@@ -454,13 +557,19 @@ export async function completeGoogleRegistration(req: Request, res: Response) {
     }
 
     // Verify Google ID token
-    const ticket = await client.verifyIdToken({
-      idToken,
-      audience: config.google.webClientId,
-    });
+    let payload;
+    try {
+      payload = await verifyGoogleIdToken(idToken);
+    } catch (tokenErr: any) {
+      console.error("Google token verification failed in registration:", tokenErr.message);
+      return res.status(401).json({
+        success: false,
+        message: "Google token verification failed: " + tokenErr.message,
+      });
+    }
 
-    const payload = ticket.getPayload();
     if (!payload || !payload.email || !payload.name) {
+      console.error("Invalid Google token payload in registration:", payload);
       return res.status(401).json({
         success: false,
         message: "Invalid Google token",
@@ -475,6 +584,7 @@ export async function completeGoogleRegistration(req: Request, res: Response) {
 
     if (user) {
       // User already exists
+      console.warn(`User already exists: ${email}`);
       return res.status(409).json({
         success: false,
         message: "Account already exists. Please log in instead.",
@@ -547,11 +657,40 @@ export async function completeGoogleRegistration(req: Request, res: Response) {
         refreshToken,
       },
     });
-  } catch (error) {
-    console.error("Complete registration error:", error);
+  } catch (error: any) {
+    console.error("Complete registration error:", {
+      name: error?.name,
+      message: error?.message,
+      code: error?.code,
+      stack: error?.stack?.split('\n')[0]
+    });
+
+    if (error?.message === "Google OAuth client ID is not configured") {
+      return res.status(500).json({
+        success: false,
+        message: "Google sign-in is not configured on the server",
+      });
+    }
+
+    if (error?.message === "Malformed Google ID token" || 
+        error?.message === "Invalid Google ID token" ||
+        isGoogleTokenError(error)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired Google sign-in token",
+      });
+    }
+
+    if (isGoogleVerificationNetworkError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: "Unable to verify Google sign-in token. Please try again.",
+      });
+    }
+
     return res.status(500).json({
       success: false,
-      message: "Registration completion failed",
+      message: "Registration completion failed: " + (error?.message || "Unknown error"),
     });
   }
 }

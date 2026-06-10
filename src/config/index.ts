@@ -22,6 +22,7 @@ export const config = {
     .filter(Boolean),
   pythonBin: process.env.PYTHON_BIN || (process.platform === "win32" ? "python" : "python3"),
   google: {
+    androidClientId: process.env.GOOGLE_ANDROID_CLIENT_ID,
     webClientId: process.env.GOOGLE_WEB_CLIENT_ID,
   },
 };
