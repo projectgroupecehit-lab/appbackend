@@ -11,9 +11,11 @@ import { OAuth2Client } from "google-auth-library";
 const client = new OAuth2Client();
 
 function getGoogleAudiences() {
-  return [config.google.webClientId, config.google.androidClientId].filter(
-    (clientId): clientId is string => Boolean(clientId)
-  );
+  return [
+    config.google.webClientId,
+    config.google.androidClientId,
+    config.google.clientId,
+  ].filter((clientId): clientId is string => Boolean(clientId));
 }
 
 function isMalformedJwt(token: string) {
