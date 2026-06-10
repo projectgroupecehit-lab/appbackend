@@ -26,6 +26,12 @@ export const config = {
     webClientId: process.env.GOOGLE_WEB_CLIENT_ID,
     clientId: process.env.GOOGLE_CLIENT_ID,
   },
+  appRelease: {
+    latestVersion: Number(process.env.APP_LATEST_VERSION || 4),
+    latestVersionName: process.env.APP_LATEST_VERSION_NAME || "1.3",
+    apkUrl: process.env.APP_APK_URL || "",
+    forceUpgrade: process.env.APP_FORCE_UPGRADE === "true",
+  },
 };
 
 export function validateRequiredConfig() {

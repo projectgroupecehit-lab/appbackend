@@ -5,6 +5,7 @@ import ingestRoutes from "./ingest.routes";
 import telemetryRoutes from "./telemetry.routes";
 import userRoutes from "./user.routes";
 import analysisRoutes from "./analysis.routes";
+import configRoutes from "./config.routes";
 
 const router = Router();
 
@@ -14,5 +15,6 @@ router.use("/ingest", ingestRoutes);
 router.use("/telemetry", telemetryRoutes);
 router.use("/user", userRoutes);
 router.use("/analysis", analysisRoutes);
+router.use("/config", configRoutes);
 
 export default router;
