@@ -27,8 +27,8 @@ export const config = {
     clientId: process.env.GOOGLE_CLIENT_ID,
   },
   appRelease: {
-    latestVersion: Number(process.env.APP_LATEST_VERSION || 5),
-    latestVersionName: process.env.APP_LATEST_VERSION_NAME || "1.4",
+    latestVersion: Number(process.env.APP_LATEST_VERSION || 6),
+    latestVersionName: process.env.APP_LATEST_VERSION_NAME || "1.5",
     apkUrl: process.env.APP_APK_URL || "",
     forceUpgrade: process.env.APP_FORCE_UPGRADE === "true",
   },

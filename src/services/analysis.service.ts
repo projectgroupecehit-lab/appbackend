@@ -20,6 +20,17 @@ interface MLPredictionResult {
   reason: string;
 }
 
+type WaterSample = {
+  temperature?: number;
+  tempC?: number;
+  ph?: number;
+  turbidity?: number;
+  conductivity?: number;
+  dissolved_oxygen?: number;
+  disolved_oxygen?: number;
+  tds?: number;
+};
+
 export interface PredictionResult {
   who_status: string;
   ml_prediction: string;
@@ -32,81 +43,126 @@ const getNumber = (value: unknown, fallback: number) => {
   return Number.isFinite(numeric) ? numeric : fallback;
 };
 
-const calculateQualityScore = (sample: {
-  ph?: number;
-  turbidity?: number;
-  conductivity?: number;
-  dissolved_oxygen?: number;
-  disolved_oxygen?: number;
-  tds?: number;
-}) => {
+const getDissolvedOxygen = (sample: WaterSample) =>
+  getNumber(sample.dissolved_oxygen ?? sample.disolved_oxygen, 7);
+
+const getTemperature = (sample: WaterSample) =>
+  getNumber(sample.temperature ?? sample.tempC, 25);
+
+const calculateWaterQualityIndex = (sample: WaterSample) => {
   const ph = getNumber(sample.ph, 7);
   const turbidity = getNumber(sample.turbidity, 1);
   const conductivity = getNumber(sample.conductivity, 300);
-  const dissolvedOxygen = getNumber(sample.dissolved_oxygen ?? sample.disolved_oxygen, 7);
+  const dissolvedOxygen = getDissolvedOxygen(sample);
   const tds = getNumber(sample.tds, 200);
+  const temperature = getTemperature(sample);
 
-  const penalties = [
-    Math.min(Math.abs(ph - 7.2) * 12, 25),
-    Math.min(Math.max(turbidity - 1, 0) * 5, 30),
-    Math.min(Math.max(conductivity - 300, 0) / 20, 25),
-    Math.min(Math.abs(dissolvedOxygen - 7) * 8, 20),
-    Math.min(Math.max(tds - 250, 0) / 12, 25),
-  ];
+  const standards = {
+    phUpper: 8.5,
+    phLower: 6.5,
+    tds: 500,
+    conductivity: 300,
+    dissolvedOxygen: 5,
+    turbidity: 5,
+    temperature: 25,
+  };
 
-  return Math.round(Math.max(0, 100 - penalties.reduce((sum, penalty) => sum + penalty, 0)));
+  const weights = {
+    ph: 4,
+    tds: 3,
+    conductivity: 3,
+    dissolvedOxygen: 5,
+    turbidity: 3,
+    temperature: 2,
+  };
+
+  const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
+  const phStandard = ph >= 7 ? standards.phUpper : standards.phLower;
+  const phQuality = 100 * (Math.abs(ph - 7) / Math.abs(phStandard - 7));
+  const dissolvedOxygenQuality = 100 * ((14.6 - dissolvedOxygen) / (14.6 - standards.dissolvedOxygen));
+
+  const wqi =
+    (weights.ph / totalWeight) * phQuality +
+    (weights.tds / totalWeight) * (100 * (tds / standards.tds)) +
+    (weights.conductivity / totalWeight) * (100 * (conductivity / standards.conductivity)) +
+    (weights.dissolvedOxygen / totalWeight) * dissolvedOxygenQuality +
+    (weights.turbidity / totalWeight) * (100 * (turbidity / standards.turbidity)) +
+    (weights.temperature / totalWeight) * (100 * (temperature / standards.temperature));
+
+  return Math.round(Math.max(0, wqi) * 100) / 100;
 };
 
-const ruleBasedPrediction = (sample: {
-  ph?: number;
-  turbidity?: number;
-  conductivity?: number;
-  dissolved_oxygen?: number;
-  disolved_oxygen?: number;
-  tds?: number;
-}): MLPredictionResult => {
+const getWqiStatus = (wqi: number) => {
+  if (wqi <= 25) return 'EXCELLENT';
+  if (wqi <= 50) return 'GOOD';
+  if (wqi <= 75) return 'POOR';
+  if (wqi <= 100) return 'VERY POOR';
+  return 'UNSUITABLE FOR DRINKING (CRITICAL)';
+};
+
+const getWhoViolations = (sample: WaterSample) => {
   const ph = getNumber(sample.ph, 7);
   const turbidity = getNumber(sample.turbidity, 1);
   const conductivity = getNumber(sample.conductivity, 300);
-  const dissolvedOxygen = getNumber(sample.dissolved_oxygen ?? sample.disolved_oxygen, 7);
+  const dissolvedOxygen = getDissolvedOxygen(sample);
+  const tds = getNumber(sample.tds, 200);
+  const violations: string[] = [];
+
+  if (ph < 6.5 || ph > 8.5) violations.push('pH outside 6.5-8.5');
+  if (turbidity > 5) violations.push('turbidity above 5 NTU');
+  if (conductivity > 1500) violations.push('conductivity above 1500 uS/cm');
+  if (dissolvedOxygen < 4) violations.push('dissolved oxygen below 4.0 mg/L');
+  if (tds > 1000) violations.push('TDS above 1000 mg/L');
+
+  return violations;
+};
+
+const classifyParameters = (sample: WaterSample) => {
+  const ph = getNumber(sample.ph, 7);
+  const turbidity = getNumber(sample.turbidity, 1);
+  const conductivity = getNumber(sample.conductivity, 300);
+  const dissolvedOxygen = getDissolvedOxygen(sample);
   const tds = getNumber(sample.tds, 200);
 
-  const hasWhoViolation =
-    ph < 6.5 ||
-    ph > 8.5 ||
-    turbidity >= 5 ||
-    conductivity >= 400 ||
-    dissolvedOxygen < 6.5 ||
-    dissolvedOxygen > 8 ||
-    tds >= 400;
+  const tdsStatus = tds > 1000 ? 'Worse' : tds >= 50 && tds <= 300 ? 'Best' : tds <= 600 ? 'Acceptable' : 'Elevated';
+  const ecStatus = conductivity > 1500 ? 'Worse' : conductivity >= 100 && conductivity <= 400 ? 'Best' : conductivity <= 1000 ? 'Acceptable' : 'Elevated';
+  const doStatus = dissolvedOxygen < 4 ? 'Worse' : dissolvedOxygen <= 6.5 ? 'Acceptable' : dissolvedOxygen <= 8 ? 'Best' : 'High';
+  const phStatus = ph < 6.5 || ph > 8.5 ? 'Worse' : 'Best';
+  const turbidityStatus = turbidity > 5 ? 'Worse' : turbidity < 1 ? 'Best' : 'Acceptable';
 
-  if (hasWhoViolation) {
+  return [
+    `TDS ${tds} mg/L: ${tdsStatus}`,
+    `EC ${conductivity} uS/cm: ${ecStatus}`,
+    `DO ${dissolvedOxygen} mg/L: ${doStatus}`,
+    `pH ${ph}: ${phStatus}`,
+    `Turbidity ${turbidity} NTU: ${turbidityStatus}`,
+  ].join('; ');
+};
+
+const ruleBasedPrediction = (sample: WaterSample): MLPredictionResult => {
+  const whoViolations = getWhoViolations(sample);
+
+  if (whoViolations.length > 0) {
     return {
       who_status: 'Unsafe (WHO Rule Violation)',
       ml_prediction: 'Non-Potable Water',
       ml_probability: 0,
-      reason: 'WHO safety thresholds exceeded',
+      reason: whoViolations.join('; '),
     };
   }
 
-  const score = calculateQualityScore(sample);
+  const wqi = calculateWaterQualityIndex(sample);
+  const isPotable = wqi <= 50;
 
   return {
-    who_status: score >= 75 ? 'Safe (Potable)' : 'Needs Treatment',
-    ml_prediction: score >= 75 ? 'Potable Water' : 'Non-Potable Water',
-    ml_probability: Math.min(0.99, Math.max(0.01, score / 100)),
+    who_status: isPotable ? 'Safe (Potable)' : 'Needs Treatment',
+    ml_prediction: isPotable ? 'Potable Water' : 'Non-Potable Water',
+    ml_probability: Math.min(0.99, Math.max(0.01, (100 - Math.min(wqi, 100)) / 100)),
     reason: 'Rule-based fallback assessment',
   };
 };
 
-const callPythonMLPredictor = (sampleData: {
-  ph?: number;
-  turbidity?: number;
-  conductivity?: number;
-  dissolved_oxygen?: number;
-  disolved_oxygen?: number;
-  tds?: number;
-}): Promise<MLPredictionResult> => {
+const callPythonMLPredictor = (sampleData: WaterSample): Promise<MLPredictionResult> => {
   return new Promise((resolve) => {
     try {
       const pythonScript = path.join(__dirname, '..', '..', 'predict_water_quality.py');
@@ -162,13 +218,15 @@ export const loadMLArtifacts = async () => {
 };
 
 const fallbackInsight = (sample: any, prediction: MLPredictionResult) => {
-  const score = calculateQualityScore(sample);
+  const wqi = calculateWaterQualityIndex(sample);
+  const wqiStatus = getWqiStatus(wqi);
+  const parameterAnalysis = classifyParameters(sample);
 
   return [
-    `1. Overall Water Quality Score: ${score}/100.`,
+    `1. Overall Water Quality Score: WQI ${wqi} (${wqiStatus}).`,
     `2. Potability Assessment: ${prediction.ml_prediction}.`,
-    '3. Parameter Analysis: Review pH, turbidity, conductivity, dissolved oxygen, and TDS against accepted ranges.',
-    '4. Risks: Untreated use may affect health, taste, scaling, and aquatic safety.',
+    `3. Parameter Analysis: ${parameterAnalysis}.`,
+    `4. Risks: ${prediction.reason || 'Untreated use may affect health, taste, scaling, and aquatic safety'}.`,
     '5. Recommended Treatment: Use filtration, disinfection, aeration, or RO based on failed parameters.',
     '6. Environmental Impact: Avoid discharge or irrigation until abnormal parameters are controlled.',
     '7. One-line Conclusion: Treat and retest before drinking use.',
@@ -187,7 +245,9 @@ export const generateWaterInsights = async (
   prediction: MLPredictionResult
 ): Promise<string> => {
   try {
-    const score = calculateQualityScore(sample);
+    const wqi = calculateWaterQualityIndex(sample);
+    const wqiStatus = getWqiStatus(wqi);
+    const parameterAnalysis = classifyParameters(sample);
 
     if (!apiKey) {
       return fallbackInsight(sample, prediction);
@@ -205,14 +265,17 @@ Conductivity = ${sample.conductivity ?? 'N/A'} uS/cm
 Dissolved Oxygen = ${sample.dissolved_oxygen ?? sample.disolved_oxygen ?? 'N/A'} mg/L
 TDS = ${sample.tds ?? 'N/A'} ppm
 
-Current Water Quality Score:
-${score}/100
+Water Quality Index (WQI):
+${wqi} (${wqiStatus})
 
 ML Result:
 ${prediction.ml_prediction}
 
 WHO Status:
 ${prediction.who_status}
+
+WHO-based threshold analysis:
+${parameterAnalysis}
 
 Provide exactly these seven numbered sections:
 
@@ -227,6 +290,7 @@ Provide exactly these seven numbered sections:
 Maximum 150 words.
 
 Be concise and professional.
+For section 1, state the WQI value exactly as "WQI ${wqi} (${wqiStatus})"; do not convert it to a /100 score.
 Do not use markdown syntax such as ###, **, *, or bullet symbols.
 `;
 

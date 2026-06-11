@@ -12,27 +12,43 @@ import joblib
 import pandas as pd
 import numpy as np
 
+def get_float(sample, key, fallback):
+    try:
+        value = sample.get(key, fallback)
+        return float(value) if value is not None else fallback
+    except (TypeError, ValueError):
+        return fallback
+
 def who_rule_check(sample):
     """
-    WHO Rule-Based Hard Fail
+    WHO-based hard fail using the dashboard thresholds.
+    Best and acceptable ranges are not hard failures; only unsafe ranges fail.
     """
-    ph = sample.get('ph', 7.0)
-    turbidity = sample.get('turbidity', 1.0)
-    conductivity = sample.get('conductivity', 300)
-    dissolved_oxygen = sample.get('dissolved_oxygen') or sample.get('disolved_oxygen', 7.0)
-    tds = sample.get('tds', 200)
+    ph = get_float(sample, 'ph', 7.0)
+    turbidity = get_float(sample, 'turbidity', 1.0)
+    conductivity = get_float(sample, 'conductivity', 300.0)
+    dissolved_oxygen = sample.get('dissolved_oxygen')
+    if dissolved_oxygen is None:
+        dissolved_oxygen = sample.get('disolved_oxygen', 7.0)
+    try:
+        dissolved_oxygen = float(dissolved_oxygen)
+    except (TypeError, ValueError):
+        dissolved_oxygen = 7.0
+    tds = get_float(sample, 'tds', 200.0)
+    violations = []
 
     if ph < 6.5 or ph > 8.5:
-        return 0
-    if turbidity >= 5:
-        return 0
-    if conductivity >= 400:
-        return 0
-    if dissolved_oxygen < 6.5 or dissolved_oxygen > 8:
-        return 0
-    if tds >= 400:
-        return 0
-    return None
+        violations.append("pH outside 6.5-8.5")
+    if turbidity > 5:
+        violations.append("turbidity above 5 NTU")
+    if conductivity > 1500:
+        violations.append("conductivity above 1500 uS/cm")
+    if dissolved_oxygen < 4.0:
+        violations.append("dissolved oxygen below 4.0 mg/L")
+    if tds > 1000:
+        violations.append("TDS above 1000 mg/L")
+
+    return violations
 
 def predict_water_quality(sample_data):
     """
@@ -55,12 +71,13 @@ def predict_water_quality(sample_data):
             }
 
         # WHO hard rule check
-        if who_rule_check(sample_data) == 0:
+        who_violations = who_rule_check(sample_data)
+        if who_violations:
             return {
                 "who_status": "Unsafe (WHO Rule Violation)",
-                "ml_prediction": "Not Potable",
+                "ml_prediction": "Non-Potable Water",
                 "ml_probability": 0.0,
-                "reason": "WHO safety thresholds exceeded"
+                "reason": "; ".join(who_violations)
             }
 
         # Load model and scaler
@@ -76,8 +93,7 @@ def predict_water_quality(sample_data):
         # Prepare features
         feature_values = []
         for feature in model_features:
-            value = sample_data.get(feature) or sample_data.get('dissolved_oxygen') if feature == 'dissolved_oxygen' and 'dissolved_oxygen' not in sample_data else sample_data.get(feature, 0)
-            # Handle typo variant
+            value = sample_data.get(feature)
             if feature == 'dissolved_oxygen' and value is None:
                 value = sample_data.get('disolved_oxygen', 0)
             feature_values.append(float(value) if value is not None else 0.0)
