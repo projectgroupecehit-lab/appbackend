@@ -5,7 +5,27 @@ import { config, validateRequiredConfig } from "./config";
 import { initSocket } from "./services/socket.service";
 import { initMqtt } from "./services/mqtt.service";
 import { loadMLArtifacts } from "./services/analysis.service";
+import { syncGoogleSheetToMongo } from "./services/google-sheet-sync.service";
 import { logger } from "./utils/logger";
+
+async function runGoogleSheetSync() {
+  if (!config.googleSheet.id) {
+    logger.warn("Google Sheet sync skipped. Set GOOGLE_SHEET_ID to enable it.");
+    return;
+  }
+
+  try {
+    const result = await syncGoogleSheetToMongo({
+      sheetId: config.googleSheet.id,
+      gid: config.googleSheet.gid,
+      deviceId: config.googleSheet.deviceId || undefined,
+    });
+
+    logger.info("Google Sheet sync complete", result);
+  } catch (error) {
+    logger.error("Google Sheet sync failed", error);
+  }
+}
 
 async function main() {
   validateRequiredConfig();
@@ -23,6 +43,14 @@ async function main() {
     initMqtt();
   } else {
     logger.info("MQTT disabled. Set MQTT_ENABLED=true and MQTT_URL to enable telemetry ingestion.");
+  }
+
+  if (config.googleSheet.syncOnStart) {
+    await runGoogleSheetSync();
+  }
+
+  if (config.googleSheet.syncIntervalMs > 0) {
+    setInterval(runGoogleSheetSync, config.googleSheet.syncIntervalMs);
   }
 
   server.listen(config.port, () => {

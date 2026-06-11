@@ -16,6 +16,14 @@ export const config = {
   refreshExpiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || "30d",
   mqttEnabled: process.env.MQTT_ENABLED === "true",
   mqttUrl: process.env.MQTT_URL || "",
+  googleSheet: {
+    id: process.env.GOOGLE_SHEET_ID || "",
+    gid: process.env.GOOGLE_SHEET_GID || "0",
+    deviceId: process.env.GOOGLE_SHEET_DEVICE_ID || "",
+    syncOnStart: process.env.GOOGLE_SHEET_SYNC_ON_START === "true",
+    syncIntervalMs: Number(process.env.GOOGLE_SHEET_SYNC_INTERVAL_MS || 0),
+    syncSecret: process.env.GOOGLE_SHEET_SYNC_SECRET || "",
+  },
   corsOrigins: (process.env.CORS_ORIGINS || "")
     .split(",")
     .map((origin) => origin.trim())

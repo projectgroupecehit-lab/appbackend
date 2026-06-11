@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 import { StatusModel } from "../models/status.model";
 import { normalizeTempReading, TempReadingModel } from "../models/temp-reading.model";
+import { config } from "../config";
+import { syncGoogleSheetToMongo } from "../services/google-sheet-sync.service";
 import { io } from "../services/socket.service";
 
 export async function ingest(req: Request, res: Response) {
@@ -70,4 +72,32 @@ export async function ingest(req: Request, res: Response) {
   io.to(`device:${resolvedDeviceId}`).emit("telemetry", normalized);
 
   res.json({ ok: true, data: normalized });
+}
+
+export async function syncGoogleSheet(req: Request, res: Response) {
+  const expectedSecret = config.googleSheet.syncSecret;
+  const body = req.body || {};
+
+  if (expectedSecret && req.header("x-sync-secret") !== expectedSecret) {
+    return res.status(401).json({ ok: false, message: "Invalid sync secret" });
+  }
+
+  const sheetId = String(body.sheetId || req.query.sheetId || config.googleSheet.id);
+  const gid = String(body.gid || req.query.gid || config.googleSheet.gid);
+  const deviceId = String(body.deviceId || req.query.deviceId || config.googleSheet.deviceId || "");
+  const limitValue = body.limit || req.query.limit;
+  const limit = limitValue ? Number(limitValue) : undefined;
+
+  if (!sheetId) {
+    return res.status(400).json({ ok: false, message: "GOOGLE_SHEET_ID or sheetId is required" });
+  }
+
+  const result = await syncGoogleSheetToMongo({
+    sheetId,
+    gid,
+    deviceId: deviceId || undefined,
+    limit: Number.isFinite(limit) ? limit : undefined,
+  });
+
+  res.json(result);
 }

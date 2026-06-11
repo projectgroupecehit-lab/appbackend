@@ -10,6 +10,8 @@ export interface ITempReading extends Document {
   do?: number;
   ec?: number;
   turbidity?: number;
+  source?: string;
+  sourceRowKey?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -23,6 +25,8 @@ const TempReadingSchema = new Schema<ITempReading>(
     do: Number,
     ec: Number,
     turbidity: Number,
+    source: { type: String, index: true },
+    sourceRowKey: { type: String, unique: true, sparse: true },
   },
   { timestamps: true, collection: "temps" }
 );
@@ -52,5 +56,7 @@ export function normalizeTempReading(reading: ITempReading | null) {
     ec: plain.ec,
     conductivity: plain.ec,
     turbidity: plain.turbidity,
+    source: plain.source,
+    sourceRowKey: plain.sourceRowKey,
   };
 }

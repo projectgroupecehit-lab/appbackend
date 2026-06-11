@@ -24,6 +24,18 @@ services:
         sync: false
       - key: GOOGLE_ANDROID_CLIENT_ID
         sync: false
+      - key: GOOGLE_SHEET_ID
+        sync: false
+      - key: GOOGLE_SHEET_GID
+        value: "0"
+      - key: GOOGLE_SHEET_DEVICE_ID
+        value: NODE8266_01
+      - key: GOOGLE_SHEET_SYNC_ON_START
+        value: "true"
+      - key: GOOGLE_SHEET_SYNC_INTERVAL_MS
+        value: "300000"
+      - key: GOOGLE_SHEET_SYNC_SECRET
+        sync: false
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
